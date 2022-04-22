@@ -3267,9 +3267,9 @@ Proof.
           { apply H1. left. reflexivity. }
         (* So, by in_split, we have l2 = l2' ++ x :: l2'', for some l2', l2'' *)
         destruct (in_split X x l2 Hxl2) as [ l2' [ l2'' Hl2 ]].
-        (* We have that forall x, In x l1' -> In x (l2' ++ l2'') *)
+        (* We have that forall y, In y l1' -> In y (l2' ++ l2'') *)
         (* Here, the assumption ~ In x l1' is crucial, since l2' and l2'' are
-           not guaranteed to contain; i.e. we removed potentially the only
+           not guaranteed to contain x; i.e. we removed potentially the only
            occurrence of x from l2. *)
         (* We also have the length (l2' ++ l2'') < length l2 = length l1' *)
         (* So we can apply the IH to obtain repeats l1' *)
@@ -3302,7 +3302,45 @@ Proof.
         apply IH with l2.
         -- intros x' Hx'. apply H1. right. apply Hx'.
         -- apply H3.
-Qed.  
+Qed.
+
+Definition At { X : Type } (x : X) (n : nat) (l : list X) : Prop :=
+  exists (l1 l2 : list X),
+    l = l1 ++ x :: l2 /\ length l2 = n.
+
+Lemma AtIn { X : Type } : 
+  forall (x : X) (l : list X),
+    In x l <-> (exists (n : nat), At x n l).
+Proof.
+Admitted.
+
+Lemma IndexBounded { X : Type } :
+  forall (x : X) (n : nat) (l : list X), At x n l -> n < length l.
+Proof.
+Admitted.
+
+Lemma conversion { X : Type } :
+  forall (l1 l2:list X),
+    (forall x, In x l1 -> In x l2) ->
+      exists (idxs : list nat),
+        (length idxs = length l1)
+          /\
+        (forall n, In n idxs -> n < length l2)
+          /\
+        (forall (x : X) (n idx : nat), At x n l1 /\ At idx n idxs -> At x idx l2).
+Proof.
+Admitted.
+
+(* Lemma php_nats :
+  forall (n : nat) (l : list nat),
+    (forall n, In n l -> n < length l) -> (n < length l) ->
+      In n l \/ repeats l.
+Proof.
+Admitted. *)
+
+Lemma InNatListDecidable : forall (n : nat) (l : list nat), In n l \/ ~ In n l.
+Proof.
+Admitted.
 
 Theorem pigeonhole_principle_constructive:
   forall (X:Type) (l1 l2:list X),
