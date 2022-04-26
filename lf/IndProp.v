@@ -3250,16 +3250,20 @@ Proof.
         --   
 Abort.
 
-Theorem pigeonhole_principle: excluded_middle ->
-  forall (X:Type) (l1 l2:list X),
+Definition in_decidable (X : Type) : Prop :=
+  forall (x : X) (l : list X), In x l \/ ~ In x l.
+
+Lemma pigeonhole_principle_core:
+  forall (X:Type), in_decidable X ->  
+  forall (l1 l2:list X),  
   (forall x, In x l1 -> In x l2) ->
   length l2 < length l1 ->
   repeats l1.
 Proof.
-  intros EM X l1. induction l1 as [|x l1' IH].
+  intros X DecidableIn l1. induction l1 as [|x l1' IH].
   - simpl. intros l2 _ H. inversion H.
   - intros l2 H1 H2.
-    destruct (EM (In x l1')) as [ H | H ].
+    destruct (DecidableIn x l1') as [ H | H ].
     + apply RepeatsBase. apply H.
     + inversion H2 as [ H3 | m H3 H4 ].
       * (* By H1, we have In x l2 *)
@@ -3304,43 +3308,387 @@ Proof.
         -- apply H3.
 Qed.
 
+Theorem pigeonhole_principle: excluded_middle ->
+  forall (X:Type) (l1 l2:list X),
+  (forall x, In x l1 -> In x l2) ->
+  length l2 < length l1 ->
+  repeats l1.
+Proof.
+  intros EM X.
+  assert (DecidableIn : in_decidable X).
+    { intros x l. apply (EM (In x l)). }
+  apply (pigeonhole_principle_core X DecidableIn).
+Qed.
+
+(* Now for the constructive version. *)
+
+(* First, a couple of useful lemmas we'll need for what's to come. *)
+
+Lemma succ_not_looping : forall n, ~ S n <= n.
+Proof.
+  induction n as [| n' IH ].
+  - intros contra. inversion contra.
+  - intros contra. apply IH. apply Sn_le_Sm__n_le_m. apply contra.
+Qed.
+
+Lemma equal_list_lengths { X : Type } : forall l1 l2 l3 l4 : list X,
+  l1 ++ l2 = l3 ++ l4 -> length l2 = length l4 -> l2 = l4.
+Proof.
+  induction l1 as [| x l' IH ].
+  - simpl.
+    intros l2 l3. generalize dependent l2.
+    induction l3 as [| y l3' IH' ].
+    + simpl. intros l2 l4 H _. apply H.
+    + intros l2 l4 H1 H2.
+      exfalso.
+      rewrite H1 in H2. simpl in H2.
+      rewrite app_length in H2.
+      rewrite add_comm in H2.
+      rewrite plus_n_Sm in H2.
+Abort.
+Lemma equal_list_lengths { X : Type } : forall l1 l2 l3 l4 : list X,
+  l1 ++ l2 = l3 ++ l4 -> length l2 = length l4 -> l1 = l3 /\ l2 = l4.
+Proof.
+  intros l1 l2.
+  generalize dependent l1.
+  induction l2 as [| x l2' IH ].
+  - simpl. intros l1 l3 l4 Hlists contra.
+    induction l4 as [| x l4' IH' ].
+    + split.
+        { rewrite app_nil_r in Hlists. rewrite app_nil_r in Hlists. apply Hlists. }
+        { reflexivity. }
+    + exfalso. simpl in contra. discriminate contra.
+  - intros l1 l3 l4 Hlists Hlength.
+    destruct l4 as [| y l4' ] eqn:Hl4 .
+    + simpl in Hlength. discriminate Hlength.
+    + assert (H : (l1 ++ [x]) = (l3 ++ [y]) /\ l2' = l4').
+        {
+          apply IH.
+          * rewrite <- app_assoc. rewrite <- app_assoc. simpl. apply Hlists.
+          * simpl in Hlength. injection Hlength as Hlength. apply Hlength. 
+        }
+      destruct H as [ H1 H2 ].
+      (* x = y /\ l1 = l3 *)
+      rewrite <- rev_involutive in H1. rewrite rev_app_distr in H1.
+        replace (rev [y]) with [y] in H1 by reflexivity.
+      replace (l1 ++ [x]) with (rev (rev (l1 ++ [x]))) in H1
+        by apply rev_involutive.
+      rewrite rev_app_distr in H1.
+        replace (rev [x]) with [x] in H1 by reflexivity.
+      apply (f_equal (list X) (list X) rev) in H1.
+      rewrite rev_involutive in H1. rewrite rev_involutive in H1.
+      simpl in H1. injection H1 as Hxy Hlists'.
+      apply (f_equal (list X) (list X) rev) in Hlists'.
+      rewrite rev_involutive in Hlists'. rewrite rev_involutive in Hlists'.
+      (* Now prove the main goals *)
+      split.
+      * apply Hlists'.
+      * rewrite Hxy. rewrite H2. reflexivity.
+Qed.
+
+(* An aside: now it's clear that the app_injective_l lemma above is a
+   corollary of the equal_list_lengths lemma above. The interesting this is that
+   I realised that the full generality of app_injective_l wasn't needed for the
+   rev_pal result, and only reasoning involving rev and injectivity of cons was
+   needed. It seemed like the general app_injective_l result needed more
+   complex reasoning, involving lists not being circular. However, the proof of
+   equal_list_lengths crucially uses rev and injectivity of cons for the
+   inductive case! *)
+
+Lemma app_injective_l' { X : Type } :
+  forall (l1 l2 l3 : list X), l1 ++ l3 = l2 ++ l3 -> l1 = l2.
+Proof.
+  intros l1 l2 l3 H.
+  apply proj1 with (l3 = l3).
+  apply equal_list_lengths.
+  - apply H.
+  - reflexivity.
+Qed.
+
+(* We need some machinery for identifying where in a list a
+   particular element occurs. *)
+
+(* Question: why have I decided to count indices from the RIGHT of the list?? *)
+
 Definition At { X : Type } (x : X) (n : nat) (l : list X) : Prop :=
   exists (l1 l2 : list X),
     l = l1 ++ x :: l2 /\ length l2 = n.
 
 Lemma AtIn { X : Type } : 
   forall (x : X) (l : list X),
-    In x l <-> (exists (n : nat), At x n l).
+    In x l <-> (exists (n : nat), n < length l /\ At x n l).
 Proof.
-Admitted.
+  intros x l.
+  induction l as [| y l' IH ].
+  - split.
+    + intros contra. inversion contra.
+    + simpl. intros [n [contra _]].
+      assert (H : forall n, ~ (n < 0)).
+        { unfold lt. intros n' contra'. inversion contra'. }
+      apply (H n). apply contra.
+  - split.
+    + intros H.
+      inversion H as [ H' | H' ].
+      * exists (length l'). split.
+        ** unfold lt. simpl. apply le_n.
+        ** exists [], l'. split.
+             { rewrite H'. reflexivity. }
+             { reflexivity. }
+      * apply IH in H'. destruct H' as [n [H1 H2]].
+        exists n. split.
+        ** unfold lt.
+           transitivity (length l').
+             { apply H1. }
+             { simpl. apply le_S. reflexivity. }
+        ** destruct H2 as [l1 [l2 [H3 H4]]].
+           exists (y::l1), l2.
+           split.
+             { rewrite H3. reflexivity. }
+             { apply H4. }
+    + intros [n [H1 H2]].
+      inversion H1 as [|].
+      * destruct H2 as [l1 [l2 [H3 H4]]].
+        assert (H5 : length l' = length l2).
+          { transitivity n. { symmetry. apply H. } { symmetry. apply H4. } }
+        replace (l1 ++ x :: l2) with ((l1 ++ [x]) ++ l2) in H3
+          by (rewrite <- app_assoc; reflexivity).
+        destruct (equal_list_lengths  [y] l' (l1 ++ [x]) l2 H3 H5) as [ H6 H7 ].
+        replace ([y]) with ([] ++ [y]) in H6 by reflexivity.
+        assert (H8 : length [y] = length [x]). { reflexivity. }
+        destruct (equal_list_lengths [] [y] l1 [x] H6 H8) as [ _ H9 ].
+        injection H9 as H9.
+        left. apply H9.
+      * right. apply IH.
+        exists n. split.
+        ** apply H.
+        ** destruct H2 as [l1 [l2 [H3 H4]]].
+           destruct l1 as [| z l'' ].
+           *** simpl in H3.
+               injection H3 as _ H3.
+               exfalso.
+               apply succ_not_looping with n.
+               rewrite H3 in H. rewrite H4 in H. apply H.
+           *** injection H3 as _ H3.
+               exists l'', l2. split.
+                 { apply H3. }
+                 { apply H4. }
+Qed.
+
+Lemma AtExists { X : Type } :
+  forall n (l : list X), n < length l -> exists x, At x n l.
+Proof.
+  intros n l.
+  generalize dependent n.
+  induction l as [| x l' IH ].
+  - unfold lt. simpl. intros n contra. inversion contra.
+  - intros n Hn.
+    inversion Hn as [| m Hm Heq ].
+    + exists x. unfold At. exists [], l'.
+      split.
+        { reflexivity. }
+        { reflexivity. }
+    + destruct (IH n Hm) as [ y [ l1 [ l2 [ H1 H2 ]]]]. 
+      exists y. unfold At. exists (x::l1), l2.
+      split.
+      * simpl. rewrite H1. reflexivity.
+      * apply H2.
+Qed.
+
+Lemma AtEmpty { X : Type } : ~ exists (x : X) n, At x n [].
+Proof.
+  intros [ x [ n [ l1 [ l2 [ contra _ ]]]]].
+  destruct l1.
+  - discriminate contra.
+  - discriminate contra.
+Qed.
 
 Lemma IndexBounded { X : Type } :
   forall (x : X) (n : nat) (l : list X), At x n l -> n < length l.
 Proof.
-Admitted.
+  intros x n l [ l1 [ l2 [ H1 H2 ]]].
+  rewrite H1.
+  rewrite app_length.
+  unfold lt.
+  transitivity ((length l1) + S n).
+  - rewrite add_comm. apply le_plus_l.
+  - apply plus_le_compat_l. simpl.
+    apply n_le_m__Sn_le_Sm. rewrite H2. apply le_n. 
+Qed.
+
+(* The following is the key lemma: it says that we can lift an instance of the
+   pigeonhole principle for an arbitrary type X to the setting of lists of
+   natural numbers. Membership for lists of natural numbers is decidable, so we
+   can show the pigenhole principle holds here. We then pull the property back
+   into the realm of the type X. We can do this because we lift the problem to
+   lists of natural numbers in the following way. We convert the elements of the
+   list l1 to indices corresponding to where those elements appear in l2. *)
 
 Lemma conversion { X : Type } :
-  forall (l1 l2:list X),
+  forall (l1 l2 : list X),
     (forall x, In x l1 -> In x l2) ->
-      exists (idxs : list nat),
-        (length idxs = length l1)
+      exists (l1' l2' : list nat),
+        (length l1' = length l1) /\ (length l2' = length l2)
           /\
-        (forall n, In n idxs -> n < length l2)
+        (forall n, In n l1' -> In n l2')
           /\
-        (forall (x : X) (n idx : nat), At x n l1 /\ At idx n idxs -> At x idx l2).
+        (forall n, n < length l2' -> At n n l2')
+          /\
+        (forall (x : X) (n idx : nat),
+          At x n l1 /\ At idx n l1' -> At x idx l2).
 Proof.
 Admitted.
 
-(* Lemma php_nats :
-  forall (n : nat) (l : list nat),
-    (forall n, In n l -> n < length l) -> (n < length l) ->
-      In n l \/ repeats l.
-Proof.
-Admitted. *)
+(* We now show a lemma that if equaity of elements of a type X is decidable,
+   then so is membership in lists of elements of that type. *)
 
-Lemma InNatListDecidable : forall (n : nat) (l : list nat), In n l \/ ~ In n l.
+Lemma EqualityListMembershipDecidable { X : Type } :
+  (exists (eq : X -> X -> bool), forall (x y : X),  (x = y) <-> (eq x y) = true)
+    -> (forall (x : X) (l : list X), In x l \/ ~ (In x l)).
 Proof.
-Admitted.
+  intros [ eq Heq ] x l.
+  induction l as [| y l' IH ].
+  - right. intros contra. inversion contra.
+  - destruct IH as [ HIn | HNotIn ].
+    + left. right. apply HIn.
+    + destruct (eq x y) eqn:HEq'.
+      * left. left. symmetry. rewrite Heq. apply HEq'.
+      * right. intros [ contra | contra ].
+        { symmetry in contra. rewrite Heq in contra. rewrite HEq' in contra.
+          discriminate contra. }
+        { apply HNotIn. apply contra. }
+Qed.
+
+(* The relevant corollary of this is that membership in lists of natural numbers
+   is decidable. *)
+
+Lemma InNatListDecidable : in_decidable nat.
+Proof.
+  unfold in_decidable.
+  apply EqualityListMembershipDecidable.
+  exists eqb.
+  intros x y.
+  assert (H : reflect (x = y) (x =? y)).
+    { apply eqbP. }
+  inversion H.
+  - rewrite H1. split. reflexivity. reflexivity.
+  - split.
+    + intros Hxy. exfalso. apply H1. apply Hxy.
+    + intros contra. discriminate contra.
+Qed.
+
+(* Some final lemmas needed for the pull back. *)
+
+Lemma pad_repeat { X : Type } :
+  forall (l1 l2 : list X), repeats l1 -> repeats (l2 ++ l1).
+Proof.
+  intros l1 l2.
+  generalize dependent l1.
+  induction l2 as [| x l' IH ].
+  - intros l1 H. apply H.
+  - intros l1 H. simpl. apply RepeatsStep. apply IH. apply H.
+Qed.
+
+Lemma repeated_elements { X : Type } :
+  forall (l : list X),
+    repeats l <-> 
+      exists x idx1 idx2, idx1 <> idx2 /\ At x idx1 l /\ At x idx2 l.
+Proof.
+  induction l as [| x l' IH ].
+  - split.
+    + intros contra. inversion contra.
+    + intros H.
+      exfalso.
+      apply (@AtEmpty X).
+      destruct H as [ x [ n [ _ [ _ [ H _ ]]]]].
+      exists x, n. apply H.
+  - split.
+    + intros H.
+      inversion H as [ y l'' H' EqHead | y l'' H' EqHead ].
+      * apply AtIn in H'. 
+        destruct H' as [ n [ H1 H2 ]].
+        exists x, (length l'), n.
+        split.
+        ** intros contra.
+           unfold lt in H1. rewrite <- contra in H1.
+           apply succ_not_looping with (length l').
+           apply H1.
+        ** split.
+        *** exists [], l'.
+            split.
+              { reflexivity. }
+              { reflexivity. }
+        *** destruct H2 as [ l1 [ l2 [ H3 H4 ]]].
+            exists (x::l1), l2.
+            split.
+              { rewrite H3. reflexivity. }
+              { apply H4. }
+      * apply IH in H'.
+        destruct H' as [ x' [ idx1 [ idx2 [ H1 [ H2 H3 ]]]]].
+        exists x', idx1, idx2.
+        split.
+        ** apply H1.
+        ** split.
+        *** destruct H2 as [ l1 [ l2 [ H4 H5 ]]].
+            exists (x::l1), l2.
+            split.
+              { rewrite H4. reflexivity. }
+              { apply H5. }
+        *** destruct H3 as [ l1 [ l2 [ H4 H5 ]]].
+            exists (x::l1), l2.
+            split.
+              { rewrite H4. reflexivity. }
+              { apply H5. }
+    + intros [ x' [ idx1 [ idx2 [ H1 [ H2 H3 ]]]]].
+      (* idx1 or idx2 might be (length l') - i.e. correspond to x *)
+      destruct H2 as [l1 [l2 [H4 H5]]].
+      destruct H3 as [l3 [l4 [H6 H7]]].
+      destruct l1 as [| y l1 ].
+      * destruct l3 as [| y' l3 ].
+        ** exfalso. apply H1.
+           rewrite H4 in H6. simpl in H6.
+           injection H6 as H8.
+           rewrite H8 in H5.
+           rewrite H5 in H7.
+           apply H7.
+        ** apply RepeatsBase. apply AtIn.
+           exists idx2.
+           injection H6 as _ H8.
+           split.
+           *** rewrite H8. rewrite app_length.
+               unfold lt. transitivity (length (x'::l4)).
+                 { simpl. rewrite H7. apply le_n. }
+                 { rewrite add_comm. apply le_plus_l. }
+           *** exists l3, l4.
+               split.
+                 { injection H4 as H9 _. rewrite H9. apply H8. }
+                 { apply H7. }
+      * destruct l3 as [| y' l3 ].
+        ** apply RepeatsBase. apply AtIn.
+           exists idx1.
+           injection H4 as _ H8.
+           split.
+           *** rewrite H8. rewrite app_length.
+               unfold lt. transitivity (length (x'::l2)).
+                 { simpl. rewrite H5. apply le_n. }
+                 { rewrite add_comm. apply le_plus_l. }
+           *** exists l1, l2.
+               split.
+                 { injection H6 as H9 _. rewrite H9. apply H8. }
+                 { apply H5. }
+        ** apply RepeatsStep. apply IH.
+           exists x', idx1, idx2.
+           split.
+             { apply H1. }
+           split.
+            *** exists l1, l2. split.
+                  { injection H4 as _ H4. apply H4. }
+                  { apply H5. }
+            *** exists l3, l4. split.
+                  { injection H6 as _ H6. apply H6. }
+                  { apply H7. }
+Qed.
+
+(* We can now show the pigeonhold principle holds constructively. *)
 
 Theorem pigeonhole_principle_constructive:
   forall (X:Type) (l1 l2:list X),
@@ -3348,8 +3696,48 @@ Theorem pigeonhole_principle_constructive:
   length l2 < length l1 ->
   repeats l1.
 Proof.
-  intros X l1. induction l1 as [|x l1' IHl1'].
-  (* FILL IN HERE *) Admitted.
+  intros X l1 l2 H H'.
+  (* Convert the problem to the nat context *)
+  destruct (conversion l1 l2 H) as [ l1' [ l2' [ H1 [ H2 [ H3 [ H4 H5 ]]]]]].
+  (* apply the core lemma *)
+  assert (Hl1 : repeats l1').
+    { apply pigeonhole_principle_core with l2'.
+      - apply InNatListDecidable.
+      - apply H3.
+      - rewrite H1. rewrite H2. apply H'.  
+    }
+  (* pull back. *)
+  rewrite repeated_elements in Hl1.
+  destruct Hl1 as [ x_idx [ idx1 [ idx2 [ Hidxs [ Hidx1 Hidx2 ]]]]].
+  assert (Hx1 : exists x, At x idx1 l1).
+    { apply AtExists. rewrite <- H1. apply IndexBounded with x_idx. apply Hidx1. }
+  destruct Hx1 as [ x1 Hx1 ].
+  assert (Hx1' : At x1 x_idx l2).
+    { apply H5 with idx1. split. apply Hx1. apply Hidx1. }
+  assert (Hx2 : exists x, At x idx2 l1).
+    { apply AtExists. rewrite <- H1. apply IndexBounded with x_idx. apply Hidx2. }
+  destruct Hx2 as [ x2 Hx2 ].
+  assert (Hx2' : At x2 x_idx l2).
+    { apply H5 with idx2. split. apply Hx2. apply Hidx2. }
+  assert (H6 : x1 = x2).
+    { 
+      destruct Hx1' as [ l3 [ l3' [ H6 H7 ]]].
+      destruct Hx2' as [ l4 [ l4' [ H8 H9 ]]].
+      assert (H10 : x1::l3' = x2::l4').
+        { apply equal_list_lengths with l3 l4. rewrite <- H6.
+          - apply H8.
+          - simpl. f_equal. rewrite H7. rewrite H9. reflexivity.
+        }
+      injection H10 as H11 _. apply H11.
+    }
+  rewrite (repeated_elements l1).
+  exists x1, idx1, idx2.
+  split.
+  - apply Hidxs.
+  - split.
+    + apply Hx1.
+    + rewrite H6. apply Hx2.
+Qed.
 (** [] *)
 
 (* ================================================================= *)
