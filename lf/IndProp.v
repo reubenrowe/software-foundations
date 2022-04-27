@@ -3517,11 +3517,11 @@ Qed.
 
 (* The following is the key lemma: it says that we can lift an instance of the
    pigeonhole principle for an arbitrary type X to the setting of lists of
-   natural numbers. Membership for lists of natural numbers is decidable, so we
-   can show the pigenhole principle holds here. We then pull the property back
-   into the realm of the type X. We can do this because we lift the problem to
-   lists of natural numbers in the following way. We convert the elements of the
-   list l1 to indices corresponding to where those elements appear in l2. *)
+   natural numbers by converting the elements of the list l1 to indices
+   corresponding to where those elements appear in l2. Membership for lists of
+   natural numbers is decidable, so we can show the pigenhole principle holds
+   there. We then pull the property back into the realm of the type X, which we
+   can do because of the properties of the lifting we have constructed. *)
 
 Lemma conversion { X : Type } :
   forall (l1 l2 : list X),
@@ -3536,7 +3536,140 @@ Lemma conversion { X : Type } :
         (forall (x : X) (n idx : nat),
           At x n l1 /\ At idx n l1' -> At x idx l2).
 Proof.
-Admitted.
+  induction l1 as [| x l1'' IH ].
+  - induction l2 as [| y l2'' IH' ].
+    + intros HIn.
+      exists [], [].
+      split.
+        { reflexivity. }
+      split.
+        { reflexivity. }
+      split.
+        {  intros n contra. inversion contra. }
+      split.
+        { intros n contra. unfold lt in contra. inversion contra. }
+        { intros x n idx [ H _ ]. inversion H as [ l contra ].
+          destruct contra as [ l2 [ contra _ ]]. 
+          destruct l.
+            - discriminate contra.
+            - discriminate contra.
+        }
+    + intros HIn.
+      assert (HIn' : forall x, In x [] -> In x l2'').
+        { intros x contra. inversion contra. }
+      destruct (IH' HIn') as [l1' [l2' [H1 [H2 [H3 [H4 H5]]]]]].
+      exists [], ((length l2')::l2').
+      split.
+        { reflexivity. }
+      split.
+        { simpl. rewrite H2. reflexivity. }
+      split.
+        { intros n contra. inversion contra. }
+      split.
+        { 
+          intros n Hn. unfold lt in Hn.
+          inversion Hn as [ Hn' | m Hn' Hm ].
+          - exists [], l2'. split.
+            + reflexivity.
+            + reflexivity.
+          - destruct (H4 n Hn') as [l [l' [H6 H7]]].
+            exists ((length l2')::l), l'. split.
+            + simpl. rewrite <- H6. reflexivity.
+            + apply H7. 
+        }
+        { intros x n idx H6.
+          assert (H7 : l1' = []).
+            { destruct l1'.
+              - reflexivity.
+              - simpl in H1. discriminate H1.
+            }
+          rewrite H7 in H5.
+          destruct (H5 x n idx H6) as [l [l' [H8 H9]]].
+          exists (y::l), l'. split.
+          - simpl. rewrite H8. reflexivity.
+          - apply H9. 
+        }
+  - intros l2 HIn.
+    assert (HIn' : forall x, In x l1'' -> In x l2).
+      { intros x' H. apply HIn. right. apply H. }
+    destruct (IH l2 HIn') as [l1' [l2' [H1 [H2 [H3 [H4 H5]]]]]].
+    assert (Hx : In x l2).
+      { apply HIn. left. reflexivity. }
+    rewrite AtIn in Hx.
+    destruct Hx as [ idx [ Hidx HAt ] ].
+    destruct HAt as [l [l' [ H6 H7 ]]].
+    exists (idx::l1'), l2'.
+    split.
+      { simpl. rewrite H1. reflexivity. }
+    split.
+      { apply H2. }
+    split.
+      { intros n [ Hn | Hn ].
+        - (* n = idx *)
+          apply AtIn.
+          exists idx. split.
+          + rewrite H2. apply Hidx.
+          + rewrite <- Hn. apply H4. rewrite H2. apply Hidx.
+        - (* In n l1' *)
+          apply H3. apply Hn.
+      }
+    split.
+      { apply H4. }
+      { 
+        intros x' n idx' [Hx' Hidx'].
+        (* At x' n (x::l1'') /\ At idx' n (idx::l1')
+           So either:
+           - x' = x /\ idx' = idx /\ n = length l1'' = length l1'
+               in which case rewrite equalities, and conclude with H6 and H7
+           - At x' n l1'' /\ At idx' n l1'
+               in which case conclude with H5
+         *)
+        destruct Hx' as [l3 [l4 [H8 H9]]].
+        destruct Hidx' as [l5 [l6 [H10 H11]]].
+        destruct l3 as [| y l3' ].
+        - destruct l5 as [| y' l5' ].
+          + (* x' = x /\ idx' = idx /\ n = length l1'' = length l1' *)
+            injection H8 as Hx _. rewrite <- Hx.
+            injection H10 as Hidx' _. rewrite <- Hidx'.
+            exists l, l'. split.
+            * apply H6.
+            * apply H7.
+          + injection H8 as _ Hl1''.
+            injection H10 as _ Hl1'.
+            exfalso.
+            (* length l1' = length l1'' = length l4 = n = length l6
+                 < length (l5' ++ idx' :: l6) = length l1' *)
+            apply succ_not_looping with (length l1').
+            transitivity (length (l5' ++ idx' :: l6)).
+            * transitivity (S (length l6)).
+              ** rewrite H1. rewrite Hl1''. rewrite H9. rewrite H11. apply le_n.
+              ** rewrite app_length. rewrite add_comm. apply le_plus_trans.
+                 simpl. apply le_n.
+            * rewrite Hl1'. apply le_n.
+        - injection H8 as _ Hl1''.
+          destruct l5 as [| y' l5' ].
+          + injection H10 as _ Hl1'.
+            exfalso.
+            (* length l1'' = length l1' = length l6 = n = length l4
+                 < length (l3' ++ x' :: l4) = length l1'' *)
+            apply succ_not_looping with (length l1'').
+            transitivity (length (l3' ++ x' :: l4)).
+            * transitivity (S (length l4)).
+              ** rewrite <- H1. rewrite Hl1'. rewrite H11. rewrite H9. apply le_n.
+              ** rewrite app_length. rewrite add_comm. apply le_plus_trans.
+                 simpl. apply le_n.
+            * rewrite Hl1''. apply le_n.
+          + (* At x' n l1'' /\ At idx' n l1' *)
+            apply H5 with n. split.
+            * exists l3', l4. split.
+                { apply Hl1''. }
+                { apply H9. }
+            * injection H10 as _ Hl1'.
+              exists l5', l6. split.
+                { apply Hl1'. }
+                { apply H11. }
+      }
+Qed.
 
 (* We now show a lemma that if equaity of elements of a type X is decidable,
    then so is membership in lists of elements of that type. *)
