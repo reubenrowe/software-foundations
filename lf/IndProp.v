@@ -4015,7 +4015,31 @@ Lemma app_ne : forall (a : ascii) s re0 re1,
   ([ ] =~ re0 /\ a :: s =~ re1) \/
   exists s0 s1, s = s0 ++ s1 /\ a :: s0 =~ re0 /\ s1 =~ re1.
 Proof.
-  (* FILL IN HERE *) Admitted.
+  intros a s re0 re1.
+  split.
+  { (* The -> direction *)
+    intros H. inversion H.
+    destruct s1 as [| b s1' ].
+    - left. split.
+      + apply H3.
+      + apply H4.
+    - right.
+      injection H1 as Hab Hs.
+      exists s1', s2.
+      split.
+        { symmetry. apply Hs. }
+      split.
+        { rewrite <- Hab. apply H3. }
+        { apply H4. }
+  }
+  { (* The <- direction *)
+    intros [ [ H1 H2 ] | [s0 [s1 [ H1 [ H2 H3 ]]]] ].
+    - replace (a::s) with ([] ++ a::s) by reflexivity.
+      constructor. apply H1. apply H2.
+    - rewrite H1.
+      replace (a :: s0 ++ s1) with ((a :: s0) ++ s1) by reflexivity.
+      constructor. apply H2. apply H3.
+  }
 (** [] *)
 
 (** [s] matches [Union re0 re1] iff [s] matches [re0] or [s] matches [re1]. *)
